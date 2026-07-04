@@ -2,14 +2,12 @@
 import { startModelProxy } from './model-proxy.js';
 
 const BACKEND_DEFS = {
-    deepseek: { url: 'https://api.deepseek.com/anthropic', keyEnv: 'DEEPSEEK_API_KEY' },
-    openrouter: { url: 'https://openrouter.ai/api/v1', keyEnv: 'OPENROUTER_API_KEY' },
-    fireworks: { url: 'https://api.fireworks.ai/inference/v1', keyEnv: 'FIREWORKS_API_KEY' },
+    mimo: { url: 'https://api.xiaomimimo.com/anthropic', keyEnv: 'MIMO_API_KEY' },
 };
 
-// Legacy mode: start-proxy.js <targetUrl> <apiKey> (used by deepclaude.sh/ps1)
-const targetUrl = process.argv[2] || process.env.CHEAPCLAUDE_TARGET_URL;
-const apiKey = process.argv[3] || process.env.CHEAPCLAUDE_API_KEY;
+// Legacy mode: start-proxy.js <targetUrl> <apiKey> (used by mimoclaude.sh/ps1)
+const targetUrl = process.argv[2] || process.env.MIMOCLAUDE_TARGET_URL;
+const apiKey = process.argv[3] || process.env.MIMOCLAUDE_API_KEY;
 
 if (targetUrl && apiKey) {
     // Legacy single-backend mode
@@ -35,8 +33,8 @@ if (targetUrl && apiKey) {
         backends[name] = { url: def.url, apiKey: key || null };
     }
 
-    const fallbackUrl = backends.deepseek?.url || 'https://api.deepseek.com/anthropic';
-    const fallbackKey = backends.deepseek?.apiKey || 'unused';
+    const fallbackUrl = backends.mimo?.url || 'https://api.xiaomimimo.com/anthropic';
+    const fallbackKey = backends.mimo?.apiKey || 'unused';
 
     const args = process.argv.slice(2);
     const modeFlag = args.indexOf('--mode');
@@ -53,6 +51,6 @@ if (targetUrl && apiKey) {
     });
 
     console.log(`Proxy on :${proxy.port} (mode: ${defaultMode})`);
-    console.log(`Switch: curl -sX POST http://127.0.0.1:${proxy.port}/_proxy/mode -d backend=deepseek`);
+    console.log(`Switch: curl -sX POST http://127.0.0.1:${proxy.port}/_proxy/mode -d backend=mimo`);
     console.log(`Status: curl -s http://127.0.0.1:${proxy.port}/_proxy/status`);
 }

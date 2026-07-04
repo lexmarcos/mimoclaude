@@ -8,33 +8,24 @@ const MODEL_PATHS = ['/v1/messages'];
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per request
 
 const MODEL_REMAP = {
-    deepseek: {
-        'claude-opus-4-6':    'deepseek-v4-pro',
-        'claude-opus-4-7':    'deepseek-v4-pro',
-        'claude-sonnet-4-6':  'deepseek-v4-flash',
-        'claude-sonnet-4-5-20250929': 'deepseek-v4-flash',
-        'claude-haiku-4-5-20251001':  'deepseek-v4-flash',
-    },
-    openrouter: {
-        'claude-opus-4-6':    'deepseek/deepseek-v4-pro',
-        'claude-opus-4-7':    'deepseek/deepseek-v4-pro',
-        'claude-sonnet-4-6':  'deepseek/deepseek-v4-flash',
-        'claude-sonnet-4-5-20250929': 'deepseek/deepseek-v4-flash',
-        'claude-haiku-4-5-20251001':  'deepseek/deepseek-v4-flash',
+    mimo: {
+        'claude-opus-4-6':    'mimo-v2.5-pro',
+        'claude-opus-4-7':    'mimo-v2.5-pro',
+        'claude-sonnet-4-6':  'mimo-v2.5-pro',
+        'claude-sonnet-4-5-20250929': 'mimo-v2.5-pro',
+        'claude-haiku-4-5-20251001':  'mimo-v2.5',
     },
 };
 
 const PRICING_PER_M = {
-    deepseek:   { input: 0.44,  output: 0.87 },
-    openrouter: { input: 0.44,  output: 0.87 },
-    fireworks:  { input: 1.74,  output: 3.48 },
+    mimo:       { input: 0.435, output: 0.87 },
     anthropic:  { input: 3.00,  output: 15.00 },
-    _single:    { input: 0.44,  output: 0.87 },
+    _single:    { input: 0.435, output: 0.87 },
 };
 
 /**
  * Transform stream that intercepts SSE events and injects missing `usage`
- * fields. DeepSeek/OpenRouter may omit `usage` in message_start or
+ * fields. Some backends may omit `usage` in message_start or
  * message_delta, which crashes Claude Code ("$.input_tokens" is undefined).
  */
 class UsageNormalizer extends Transform {
@@ -125,7 +116,7 @@ function stripUnsignedThinkingBlocks(body) {
 export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends, defaultMode }) {
     return new Promise((resolve, reject) => {
         const initialTarget = new URL(targetUrl);
-        const initialBearer = targetUrl.includes('openrouter') || targetUrl.includes('fireworks');
+        const initialBearer = false; // MiMo uses x-api-key (Anthropic-compatible)
 
         const allBackends = {};
         if (backends) {
@@ -133,7 +124,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                 allBackends[name] = {
                     target: new URL(cfg.url),
                     apiKey: cfg.apiKey,
-                    useBearer: cfg.url.includes('openrouter') || cfg.url.includes('fireworks'),
+                    useBearer: false,
                 };
             }
         }
@@ -254,7 +245,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                             clientRes.end(JSON.stringify(result));
                             return;
                         }
-                        console.log(`[MODEL-PROXY] Mode switched: ${result.previous} → ${result.mode}`);
+                        console.log(`[MIMO-PROXY] Mode switched: ${result.previous} → ${result.mode}`);
                         clientRes.writeHead(200, { 'content-type': 'application/json' });
                         clientRes.end(JSON.stringify(result));
                     });
@@ -275,9 +266,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
             const isModelCall = !isAnthropicMode && MODEL_PATHS.includes(urlPath);
             const dest = isModelCall ? state.target : new URL(ANTHROPIC_FALLBACK);
 
-            // Build upstream path. target.pathname may overlap with
-            // clientReq.url (e.g. OpenRouter /api/v1 + /v1/messages).
-            // Strip the shared prefix to avoid /api/v1/v1/messages.
+            // Build upstream path.
             let fullPath;
             if (isModelCall) {
                 const base = state.target.pathname.replace(/\/$/, '');
@@ -294,7 +283,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
             const t0 = Date.now();
 
             if (isModelCall) {
-                console.log(`[MODEL-PROXY] #${reqId} → ${dest.hostname}${fullPath}`);
+                console.log(`[MIMO-PROXY] #${reqId} → ${dest.hostname}${fullPath}`);
             }
 
             const headers = { ...clientReq.headers, host: dest.host };
@@ -303,11 +292,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
             if (isModelCall) {
                 delete headers['authorization'];
                 delete headers['x-api-key'];
-                if (state.useBearer) {
-                    headers['authorization'] = `Bearer ${state.apiKey}`;
-                } else {
-                    headers['x-api-key'] = state.apiKey;
-                }
+                headers['x-api-key'] = state.apiKey;
             }
 
             const chunks = [];
@@ -315,24 +300,23 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
             clientReq.on('end', () => {
                 let body = Buffer.concat(chunks);
 
-                // Remap Anthropic model names to backend-specific names
+                // Remap Anthropic model names to MiMo model names
                 if (isModelCall && MODEL_REMAP[state.mode]) {
                     try {
                         const parsed = JSON.parse(body);
                         const mapped = MODEL_REMAP[state.mode][parsed.model];
                         if (mapped) {
-                            console.log(`[MODEL-PROXY] #${reqId} model remap: ${parsed.model} → ${mapped}`);
+                            console.log(`[MIMO-PROXY] #${reqId} model remap: ${parsed.model} → ${mapped}`);
                             parsed.model = mapped;
                             body = Buffer.from(JSON.stringify(parsed));
                         }
                     } catch { /* not JSON or parse error, pass through */ }
                 }
 
-                // Strip thinking blocks before forwarding.
-                // Non-Anthropic: strip ALL blocks — backends reject thinking blocks
-                // they didn't generate, even unsigned ones.
-                // Anthropic after a non-Anthropic session: also strip ALL, because
-                // foreign backends generate signed-but-invalid thinking blocks that
+                // Strip thinking blocks before forwarding to MiMo.
+                // MiMo may reject thinking blocks it didn't generate.
+                // Anthropic after a MiMo session: also strip ALL, because
+                // MiMo may generate signed-but-invalid thinking blocks that
                 // stripUnsignedThinkingBlocks passes through, causing Anthropic 400s.
                 if (isAnthropicMode && MODEL_PATHS.includes(urlPath)) {
                     try {
@@ -365,7 +349,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                 const proxyReq = httpsRequest(opts, (proxyRes) => {
                     if (isModelCall) {
                         const ttfb = Date.now() - t0;
-                        console.log(`[MODEL-PROXY] #${reqId} TTFB ${ttfb}ms (status ${proxyRes.statusCode})`);
+                        console.log(`[MIMO-PROXY] #${reqId} TTFB ${ttfb}ms (status ${proxyRes.statusCode})`);
                     }
 
                     const ct = proxyRes.headers['content-type'] || '';
@@ -376,7 +360,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                         const norm = new UsageNormalizer((inp, out) => recordUsage(state.mode, inp, out));
                         proxyRes.pipe(norm).pipe(clientRes);
                         proxyRes.on('end', () => {
-                            console.log(`[MODEL-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s (${norm._inputTokens}in/${norm._outputTokens}out)`);
+                            console.log(`[MIMO-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s (${norm._inputTokens}in/${norm._outputTokens}out)`);
                         });
                     } else if (isModelCall && ct.includes('application/json')) {
                         const respChunks = [];
@@ -391,7 +375,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                             const outHeaders = { ...proxyRes.headers, 'content-length': fixed.length };
                             clientRes.writeHead(proxyRes.statusCode, outHeaders);
                             clientRes.end(fixed);
-                            console.log(`[MODEL-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s (json, ${fixed.length}b)`);
+                            console.log(`[MIMO-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s (json, ${fixed.length}b)`);
                         });
                     } else {
                         // Non-model or unknown content-type: pass through
@@ -399,20 +383,20 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
                         proxyRes.pipe(clientRes);
                         if (isModelCall) {
                             proxyRes.on('end', () => {
-                                console.log(`[MODEL-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+                                console.log(`[MIMO-PROXY] #${reqId} done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
                             });
                         }
                     }
                 });
 
                 proxyReq.on('timeout', () => {
-                    console.error(`[MODEL-PROXY] #${reqId} TIMEOUT after ${REQUEST_TIMEOUT_MS / 1000}s`);
+                    console.error(`[MIMO-PROXY] #${reqId} TIMEOUT after ${REQUEST_TIMEOUT_MS / 1000}s`);
                     proxyReq.destroy(new Error('Request timeout'));
                 });
 
                 proxyReq.on('error', (err) => {
                     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-                    console.error(`[MODEL-PROXY] #${reqId} ERROR after ${elapsed}s: ${err.message}`);
+                    console.error(`[MIMO-PROXY] #${reqId} ERROR after ${elapsed}s: ${err.message}`);
                     if (!clientRes.headersSent) {
                         clientRes.writeHead(502, { 'content-type': 'application/json' });
                     }
@@ -433,7 +417,7 @@ export function startModelProxy({ targetUrl, apiKey, startPort = 3200, backends,
             });
             server.listen(port, '127.0.0.1', () => {
                 const actualPort = server.address().port;
-                console.log(`[MODEL-PROXY] Listening on 127.0.0.1:${actualPort} → ${targetUrl} (mode: ${state.mode})`);
+                console.log(`[MIMO-PROXY] Listening on 127.0.0.1:${actualPort} → ${targetUrl} (mode: ${state.mode})`);
                 resolve({ port: actualPort, close: () => server.close(), switchMode });
             });
         }
