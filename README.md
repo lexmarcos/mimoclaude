@@ -2,6 +2,8 @@
 
 Use Claude Code's autonomous agent loop with **Xiaomi MiMo V2.5 Pro**. Same UX, 7x cheaper, 1M token context window.
 
+> Built on top of [DeepClaude](https://github.com/aattaran/deepclaude) — a proxy that lets you use alternative backends with Claude Code. Mimoclaude adapts this architecture to run **Xiaomi MiMo V2.5 Pro** as the default model.
+
 ![Remote control running MiMo V2.5 Pro in the browser](screenshots/remote-control-deepseek.png)
 
 ## What this does
