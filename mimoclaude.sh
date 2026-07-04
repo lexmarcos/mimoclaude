@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# deepclaude — Use Claude Code with DeepSeek V4 Pro or other cheap backends
-# Usage: deepclaude [--backend ds|or|fw|anthropic] [--remote] [--status] [--cost] [--benchmark]
+# mimoclaude — Use Claude Code with Xiaomi MiMo V2.5 Pro
+# Usage: mimoclaude [--backend mi|anthropic] [--remote] [--status] [--cost] [--benchmark]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Config ---
-DEEPSEEK_URL="https://api.deepseek.com/anthropic"
-OPENROUTER_URL="https://openrouter.ai/api"
-FIREWORKS_URL="https://api.fireworks.ai/inference"
+MIMO_URL="https://api.xiaomimimo.com/anthropic"
 
-BACKEND="${CHEAPCLAUDE_DEFAULT_BACKEND:-ds}"
+BACKEND="${MIMOCLAUDE_DEFAULT_BACKEND:-mi}"
 ACTION="launch"
 SWITCH_BACKEND=""
 PROXY_PID=""
@@ -46,31 +44,15 @@ mask_key() {
 resolve_backend() {
     local url="" key="" opus="" sonnet="" haiku="" subagent=""
     case "$BACKEND" in
-        ds|deepseek)
-            key="${DEEPSEEK_API_KEY:-}"
-            [[ -z "$key" ]] && { echo "ERROR: DEEPSEEK_API_KEY not set" >&2; exit 1; }
-            url="$DEEPSEEK_URL"
-            opus="deepseek-v4-pro"; sonnet="deepseek-v4-pro"
-            haiku="deepseek-v4-flash"; subagent="deepseek-v4-flash"
-            ;;
-        or|openrouter)
-            key="${OPENROUTER_API_KEY:-}"
-            [[ -z "$key" ]] && { echo "ERROR: OPENROUTER_API_KEY not set" >&2; exit 1; }
-            url="$OPENROUTER_URL"
-            opus="deepseek/deepseek-v4-pro"; sonnet="deepseek/deepseek-v4-pro"
-            haiku="deepseek/deepseek-v4-pro"; subagent="deepseek/deepseek-v4-pro"
-            ;;
-        fw|fireworks)
-            key="${FIREWORKS_API_KEY:-}"
-            [[ -z "$key" ]] && { echo "ERROR: FIREWORKS_API_KEY not set" >&2; exit 1; }
-            url="$FIREWORKS_URL"
-            opus="accounts/fireworks/models/deepseek-v4-pro"
-            sonnet="accounts/fireworks/models/deepseek-v4-pro"
-            haiku="accounts/fireworks/models/deepseek-v4-pro"
-            subagent="accounts/fireworks/models/deepseek-v4-pro"
+        mi|mimo)
+            key="${MIMO_API_KEY:-}"
+            [[ -z "$key" ]] && { echo "ERROR: MIMO_API_KEY not set" >&2; exit 1; }
+            url="$MIMO_URL"
+            opus="mimo-v2.5-pro"; sonnet="mimo-v2.5-pro"
+            haiku="mimo-v2.5"; subagent="mimo-v2.5"
             ;;
         anthropic) ;;
-        *) echo "ERROR: Unknown backend '$BACKEND'. Use: ds, or, fw, anthropic" >&2; exit 1 ;;
+        *) echo "ERROR: Unknown backend '$BACKEND'. Use: mi, anthropic" >&2; exit 1 ;;
     esac
     RESOLVED_URL="$url"; RESOLVED_KEY="$key"
     RESOLVED_OPUS="$opus"; RESOLVED_SONNET="$sonnet"
@@ -87,21 +69,17 @@ set_model_env() {
 
 show_status() {
     echo ""
-    echo "  deepclaude — Backend Status"
-    echo "  ============================"
+    echo "  mimoclaude — Backend Status"
+    echo "  ==========================="
     echo ""
     echo "  Keys:"
-    echo "    DEEPSEEK_API_KEY:    $(mask_key "${DEEPSEEK_API_KEY:-}")"
-    echo "    OPENROUTER_API_KEY:  $(mask_key "${OPENROUTER_API_KEY:-}")"
-    echo "    FIREWORKS_API_KEY:   $(mask_key "${FIREWORKS_API_KEY:-}")"
+    echo "    MIMO_API_KEY:        $(mask_key "${MIMO_API_KEY:-}")"
     echo ""
     echo "  Backends:"
-    echo "    deepclaude                  # DeepSeek V4 Pro (default)"
-    echo "    deepclaude -b or            # OpenRouter (cheapest)"
-    echo "    deepclaude -b fw            # Fireworks AI (fastest)"
-    echo "    deepclaude -b anthropic     # Normal Claude Code"
-    echo "    deepclaude --remote         # Remote control + DeepSeek"
-    echo "    deepclaude --remote -b or   # Remote control + OpenRouter"
+    echo "    mimoclaude                  # Xiaomi MiMo V2.5 Pro (default)"
+    echo "    mimoclaude -b anthropic     # Normal Claude Code"
+    echo "    mimoclaude --remote         # Remote control + MiMo"
+    echo "    mimoclaude --remote -b anthropic  # Remote control + Anthropic"
     echo ""
     local proxy_status
     proxy_status=$(curl -s http://127.0.0.1:3200/_proxy/status 2>/dev/null) || proxy_status=""
@@ -116,53 +94,48 @@ show_status() {
 
 show_cost() {
     echo ""
-    echo "  DeepSeek V4 Pro Pricing"
-    echo "  ======================="
+    echo "  Xiaomi MiMo V2.5 Pro Pricing"
+    echo "  ============================"
     echo ""
     echo "  Provider        Input/M    Output/M   Cache Hit/M"
     echo "  ----------      --------   --------   -----------"
-    echo "  DeepSeek        \$0.44      \$0.87      \$0.004"
-    echo "  OpenRouter      \$0.44      \$0.87      (provider)"
-    echo "  Fireworks       \$1.74      \$3.48      (provider)"
+    echo "  Xiaomi MiMo     \$0.435     \$0.87      \$0.0036"
     echo "  Anthropic       \$3.00      \$15.00     \$0.30"
     echo ""
-    echo "  Monthly estimate (heavy use, 25 days): \$30-80"
+    echo "  Monthly estimate (heavy use, 25 days): \$18-45"
+    echo "  vs Anthropic Max plan: \$200/mo (capped)"
     echo ""
 }
 
 show_help() {
-    echo "deepclaude — Claude Code with cheap backends"
+    echo "mimoclaude — Claude Code with Xiaomi MiMo V2.5 Pro"
     echo ""
-    echo "Usage: deepclaude [options] [-- claude-args...]"
+    echo "Usage: mimoclaude [options] [-- claude-args...]"
     echo ""
     echo "Options:"
-    echo "  -b, --backend <ds|or|fw|anthropic>  Backend (default: ds)"
-    echo "  -r, --remote                        Remote control mode (browser URL)"
-    echo "  --status                             Show keys and backends"
-    echo "  --cost                               Pricing comparison"
-    echo "  --benchmark                          Latency test"
-    echo "  -s, --switch <backend>               Switch proxy mid-session"
-    echo "  -h, --help                           This help"
+    echo "  -b, --backend <mi|anthropic>  Backend (default: mi)"
+    echo "  -r, --remote                  Remote control mode (browser URL)"
+    echo "  --status                       Show keys and backends"
+    echo "  --cost                         Pricing comparison"
+    echo "  --benchmark                    Latency test"
+    echo "  -s, --switch <backend>         Switch proxy mid-session"
+    echo "  -h, --help                     This help"
     echo ""
     echo "Environment variables:"
-    echo "  DEEPSEEK_API_KEY      DeepSeek API key (required for ds)"
-    echo "  OPENROUTER_API_KEY    OpenRouter API key (required for or)"
-    echo "  FIREWORKS_API_KEY     Fireworks API key (required for fw)"
-    echo "  CHEAPCLAUDE_DEFAULT_BACKEND  Default backend (default: ds)"
+    echo "  MIMO_API_KEY              Xiaomi MiMo API key (required)"
+    echo "  MIMOCLAUDE_DEFAULT_BACKEND  Default backend (default: mi)"
 }
 
 do_switch() {
     local backend="$SWITCH_BACKEND"
     case "$backend" in
-        ds|deepseek)   backend="deepseek" ;;
-        or|openrouter) backend="openrouter" ;;
-        fw|fireworks)  backend="fireworks" ;;
+        mi|mimo)       backend="mimo" ;;
         anthropic)     backend="anthropic" ;;
-        *) echo "ERROR: Unknown backend '$backend'. Use: ds, or, fw, anthropic" >&2; exit 1 ;;
+        *) echo "ERROR: Unknown backend '$backend'. Use: mi, anthropic" >&2; exit 1 ;;
     esac
     local resp
     resp=$(curl -sX POST http://127.0.0.1:3200/_proxy/mode -d "backend=$backend" 2>/dev/null) || {
-        echo "  Proxy not running. Start with: deepclaude" >&2; exit 1
+        echo "  Proxy not running. Start with: mimoclaude" >&2; exit 1
     }
     echo "  $resp"
 }
@@ -171,12 +144,10 @@ run_benchmark() {
     echo ""
     echo "  Latency Benchmark (1 request each)"
     echo "  ==================================="
-    for name in deepseek openrouter fireworks; do
+    for name in mimo; do
         local url="" key="" model=""
         case "$name" in
-            deepseek)   url="$DEEPSEEK_URL"; key="${DEEPSEEK_API_KEY:-}"; model="deepseek-v4-pro" ;;
-            openrouter) url="$OPENROUTER_URL"; key="${OPENROUTER_API_KEY:-}"; model="deepseek/deepseek-v4-pro" ;;
-            fireworks)  url="$FIREWORKS_URL"; key="${FIREWORKS_API_KEY:-}"; model="accounts/fireworks/models/deepseek-v4-pro" ;;
+            mimo) url="$MIMO_URL"; key="${MIMO_API_KEY:-}"; model="mimo-v2.5-pro" ;;
         esac
         if [[ -z "$key" ]]; then echo "  $name: SKIP (no key)"; continue; fi
         local start_ms=$(date +%s%3N 2>/dev/null || python3 -c 'import time;print(int(time.time()*1000))')
@@ -207,9 +178,9 @@ launch_claude() {
 
     resolve_backend
 
-    echo "  Launching Claude Code via $BACKEND..."
+    echo "  Launching Claude Code via Xiaomi MiMo V2.5 Pro..."
     echo "  Endpoint: $RESOLVED_URL"
-    echo "  Model: $RESOLVED_OPUS (main) + $RESOLVED_HAIKU (subagents)"
+    echo "  Model: $RESOLVED_OPUS"
     echo ""
 
     export ANTHROPIC_BASE_URL="$RESOLVED_URL"
@@ -232,7 +203,7 @@ launch_remote() {
 
     resolve_backend
 
-    echo "  Starting model proxy for $BACKEND..."
+    echo "  Starting model proxy for MiMo..."
 
     local port_file
     port_file=$(mktemp)
@@ -256,7 +227,7 @@ launch_remote() {
     rm -f "$port_file"
 
     echo "  Proxy on :$proxy_port -> $RESOLVED_URL"
-    echo "  Launching remote control via $BACKEND..."
+    echo "  Launching remote control via MiMo..."
     echo ""
 
     export ANTHROPIC_BASE_URL="http://127.0.0.1:$proxy_port"
